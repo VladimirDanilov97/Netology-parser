@@ -4,49 +4,62 @@ import asyncio
 import aiohttp
 import logging
 import time
-
+import requests
+from fake_useragent import UserAgent
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(message)s')
-# logging.disable(logging.DEBUG)
+logging.disable(logging.CRITICAL)
 
-KEYWORDS = ['дизайн', 'фото', 'web', 'python', ]
-url = 'https://habr.com/ru/all/'
+
+
+def scrap_main_page(User_Agent):
+    headers = {
+    'User-Agent': User_Agent
+    }
+    url = 'https://habr.com/ru/all/'
+    response = requests.get(url=url, headers=headers) 
+    with open('index.html', 'w') as f:
+        f.write(response.text)
+    soup = BeautifulSoup(response.text, 'html.parser')
+    times = soup.find_all('time')
+    titles = soup.find_all('a', class_='tm-article-snippet__title-link')
+    all_keywords = soup.find_all(class_='tm-article-snippet__hubs')
+    zipped = list(zip(titles, all_keywords, times))
+
+    return zipped
 
 async def scrap_content_page(link):
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession() as session:   
         async with session.get(url=link) as resp:
-                    title_soup = BeautifulSoup(await resp.text(), 'html.parser')
-                    text = title_soup.find(id='post-content-body').text.lower()
-    return text
+                title_soup = BeautifulSoup(await resp.text(), 'html.parser')
+                text = title_soup.find(id='post-content-body').text.lower()
+                return text
+         
 
-    
-async def get_data():
-    result = []
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url=url) as response:
-            response_text = await response.text()
-            soup = BeautifulSoup(response_text, 'html.parser')
-            times = soup.find_all('time')
-            titles = soup.find_all('a', class_='tm-article-snippet__title-link')
-            all_keywords = soup.find_all('div', class_='tm-article-snippet__hubs')
-            zipped = list(zip(titles, all_keywords, times))
-            for title, keyword, time in zipped:
-                logging.debug(f'{title.text}')
-                link = 'https://habr.com'+title['href']
-                text = await scrap_content_page(link)
-                logging.debug(f'2 = {title.text}')
-                if (
-                set(keyword) & set(KEYWORDS) != set()) or (
-                set(text.split()) & set(KEYWORDS) != set()) or (
-                set(title.text.split()) & set(KEYWORDS) != set()):
-                    result.append([
-                        time['datetime'],
-                        title.text,
-                        link])
-    logging.info(f'{result}')
+async def filter_func(tuple, KEYWORDS):
+    link ='https://habr.com' + tuple[0]['href']
+    text = await scrap_content_page(link)
+    title = tuple[0].text
+    keywords = tuple[1].text 
+    time = tuple[2]['datetime']
+    logging.debug(f'{title}')  
+    if (
+    set(text.lower().split()) & set(KEYWORDS) != set()) or (
+    set(title.lower().split()) & set(KEYWORDS) != set()) or (
+    set(keywords.lower().split()) & set(KEYWORDS) != set()):
+        return(time, title, link)
 
 async def main():
-    await get_data()
+
+    KEYWORDS = ['дизайн', 'фото', 'web', 'python', ]
+    ua = UserAgent()
+    zipped = scrap_main_page(User_Agent=ua.google)
+    tasks = [filter_func(tup, KEYWORDS) for tup in zipped]
+    l = await asyncio.gather(*tasks)
+    result = list(filter(lambda x: x != None, l))
+    return result
+     
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+    res = asyncio.run(main())
+    pprint(res)
